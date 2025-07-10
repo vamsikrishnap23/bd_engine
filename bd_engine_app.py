@@ -667,7 +667,7 @@ with tab4:
                 st.error(f"Conversation failed: {e}")
 
 
-# ---------- Footer at End of Page ----------
+# ---------- footer  ----------
 st.markdown("---")  # visual separator
 
 col1, col2, col3 = st.columns([1, 2, 1])
@@ -679,7 +679,7 @@ with col2:
             <a href="https://altara.in" target="_blank">
                 <img src="https://altara.in/assets/Favicon-CkpRsanc.png" width="80" style="box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 8px;">
             </a>
-            <p style="margin-top: 6px; font-size: 13px; color: #666;">Built by ALTARA</p>
+            <p style="margin-top: 6px; font-size: 13px; color: #fff;">Built by ALTARA</p>
         </div>
         """,
         unsafe_allow_html=True
