@@ -9,6 +9,8 @@ __pycache__/
 dist/
 build/
 
+*.eml
+
 .env
 *.env
 
