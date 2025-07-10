@@ -37,7 +37,6 @@ ENV/
 .streamlit/secrets.toml
 
 leads/
-*.csv
 *.pdf
 __output__/
 temp/
