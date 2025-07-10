@@ -6,9 +6,90 @@ import os
 from datetime import datetime
 from urllib.parse import quote
 import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
 
-import os
+from supabase import create_client, Client
+
 os.environ["STREAMLIT_WATCHDOG_USE_POLLING"] = "true"
+import json
+from supabase import create_client, Client
+from storage3.utils import StorageException
+
+from supabase_utils import supa_list_folders, supa_download_json, supa_upload_json, supa_upload_file, supa_upload_json, supa_upload_csv, supa_load_json
+
+
+
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def supa_read_json(bucket: str, path: str):
+    try:
+        res = supabase.storage.from_(bucket).download(path)
+        return json.loads(res.decode("utf-8"))
+    except StorageException as e:
+        print(f"[supa_read_json] Failed to read {path}: {e}")
+        return None
+    except Exception as e:
+        print(f"[supa_read_json] Unknown error: {e}")
+        return None
+
+
+def supa_write_json(bucket: str, path: str, data: dict):
+    try:
+        return supabase.storage.from_(bucket).upload(
+            path,
+            json.dumps(data, indent=2),
+            {"content-type": "application/json"},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[supa_write_json] Failed to write {path}: {e}")
+        return None
+
+
+def supa_read_text(bucket: str, path: str):
+    try:
+        res = supabase.storage.from_(bucket).download(path)
+        return res.decode("utf-8")
+    except StorageException as e:
+        print(f"[supa_read_text] Failed to read {path}: {e}")
+        return None
+
+
+def supa_write_text(bucket: str, path: str, text: str):
+    try:
+        return supabase.storage.from_(bucket).upload(
+            path,
+            text,
+            {"content-type": "text/plain"},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[supa_write_text] Failed to write {path}: {e}")
+        return None
+
+
+def supa_list_folders(bucket: str, prefix: str = ""):
+    try:
+        response = supabase.storage.from_(bucket).list(path=prefix)
+        if response is None:
+            print(f"[supa_list_folders] Got None for prefix: {prefix}")
+            return []
+        
+        print(f"[supa_list_folders] Response for '{prefix}':", response)
+
+        # Treat items without a dot (.) as folders
+        folders = [item['name'] for item in response if '.' not in item['name']]
+        return folders
+
+    except Exception as e:
+        print(f"[supa_list_folders] Error: {e}")
+        return []
+
 
 
 st.set_page_config(page_title="BD Engine", layout="wide")
@@ -16,8 +97,7 @@ st.set_page_config(page_title="BD Engine", layout="wide")
 st.image("assets/tp_logo.svg")
 
 
-# Ensure leads folder exists
-os.makedirs("leads", exist_ok=True)
+# os.makedirs("leads", exist_ok=True)
 
 
 def fetch_linkedin_posts(linkedin_url, lead_dir):
@@ -96,21 +176,17 @@ def render_persona(persona):
 tab1, tab2, tab3, tab4 = st.tabs(["Dashboard", "Scrape Leads", "Persona Dashboard", "Talk To Leads"])
 
 
-# -----------------------------------------
-# TAB 1: DASHBOARD
-# -----------------------------------------
 with tab1:
     st.subheader("Scraped Leads Dashboard")
 
-    dates = sorted([d for d in os.listdir("leads") if os.path.isdir(os.path.join("leads", d))], reverse=True)
+    dates = sorted(supa_list_folders("leads"), reverse=True)
 
     if not dates:
         st.info("No scrapes found. Run a scrape from the second tab.")
     else:
         selected_date = st.selectbox("Select Scrape Date", dates)
 
-        lead_folder = os.path.join("leads", selected_date)
-        lead_dirs = sorted(os.listdir(lead_folder))
+        lead_dirs = sorted(supa_list_folders("leads", prefix=f"{selected_date}/"))
 
         search_term = st.text_input("Search (name, email, company, title)", "").strip().lower()
 
@@ -119,120 +195,119 @@ with tab1:
         else:
             matches = 0
             for lead_name in lead_dirs:
-                lead_dir = os.path.join(lead_folder, lead_name)
-                lead_path = os.path.join(lead_dir, "lead.json")
-                persona_path = os.path.join(lead_dir, "persona.json")
+                lead_path = f"{selected_date}/{lead_name}/lead.json"
+                persona_path = f"{selected_date}/{lead_name}/persona.json"
 
-                if os.path.exists(lead_path):
-                    with open(lead_path) as f:
-                        lead = json.load(f)
+                lead = supa_download_json("leads", lead_path)
+                persona = supa_download_json("leads", persona_path)
 
-                    emp = next((e for e in lead.get("employment_history", []) if e.get("current")), {})
-                    full_name = f"{lead.get('first_name', '')} {lead.get('last_name', '')}"
-                    email = lead.get("email", "")
-                    company = emp.get("organization_name", "")
-                    title = emp.get("title", "")
-                    searchable = f"{full_name} {email} {company} {title}".lower()
+                if not lead:
+                    continue
 
-                    if search_term and search_term not in searchable:
-                        continue
+                emp = next((e for e in lead.get("employment_history", []) if e.get("current")), {})
+                full_name = f"{lead.get('first_name', '')} {lead.get('last_name', '')}"
+                email = lead.get("email", "")
+                company = emp.get("organization_name", "")
+                title = emp.get("title", "")
+                searchable = f"{full_name} {email} {company} {title}".lower()
 
-                    matches += 1
-                    photo = lead.get("photo_url", "")
+                if search_term and search_term not in searchable:
+                    continue
 
-                    with st.expander(f"{full_name} - {title} @ {company}"):
-                        cols = st.columns([1, 3])
-                        with cols[0]:
-                            if photo:
-                                st.image(photo, width=100)
-                        with cols[1]:
-                            st.markdown(f"**Email:** {email}")
-                            st.markdown(f"**LinkedIn:** [{lead.get('linkedin_url', '')}]({lead.get('linkedin_url', '')})")
-                            st.markdown(f"**Location:** {lead.get('city', '')}, {lead.get('state', '')}, {lead.get('country', '')}")
-                            st.markdown(f"**Seniority:** {lead.get('seniority', '')}")
-                            st.markdown(f"**Industry:** {lead.get('industry', '')}")
-                            st.markdown(f"**Departments:** {', '.join(lead.get('departments', []))}")
+                matches += 1
+                photo = lead.get("photo_url", "")
 
-                            if os.path.exists(persona_path):
-                                with open(persona_path) as pf:
-                                    persona = json.load(pf)
-                                st.markdown("---")
-                                st.markdown("**Persona:**")
+                with st.expander(f"{full_name} - {title} @ {company}"):
+                    cols = st.columns([1, 3])
+                    with cols[0]:
+                        if photo:
+                            st.image(photo, width=100)
+                    with cols[1]:
+                        st.markdown(f"**Email:** {email}")
+                        st.markdown(f"**LinkedIn:** [{lead.get('linkedin_url', '')}]({lead.get('linkedin_url', '')})")
+                        st.markdown(f"**Location:** {lead.get('city', '')}, {lead.get('state', '')}, {lead.get('country', '')}")
+                        st.markdown(f"**Seniority:** {lead.get('seniority', '')}")
+                        st.markdown(f"**Industry:** {lead.get('industry', '')}")
+                        st.markdown(f"**Departments:** {', '.join(lead.get('departments', []))}")
+
+                    if persona:
+                        st.markdown("---")
+                        st.markdown("**Persona:**")
+                        render_persona(persona)
+                    else:
+                        if st.button(f"Build Persona for {full_name}", key=f"btn_{lead_name}"):
+                            from dotenv import load_dotenv
+                            from openai import OpenAI
+                            load_dotenv()
+                            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+                            linkedin_url = lead.get("linkedin_url", "")
+                            posts = fetch_linkedin_posts(linkedin_url, f"{selected_date}/{lead_name}")
+                            post_snippets = "\n".join(posts[:5]) if posts else "No public posts available."
+
+                            org = lead.get("organization", {})
+                            skills = ', '.join(lead.get("skills", [])[:10])
+                            tags = ', '.join(lead.get("tags", [])[:10])
+                            keywords = ', '.join(org.get("keywords", [])[:15])
+                            bio = lead.get("summary", "") or lead.get("bio", "")
+
+                            prompt = f"""
+                                You are an advanced persona modeling system for B2B outreach.
+
+                                Given the full professional and public-facing information of a lead, construct a complete **behavioral persona** that can be used to simulate realistic conversations and generate personalized communication.
+
+                                --- Personal Info ---
+                                Name: {full_name}
+                                Title: {title}
+                                Seniority: {lead.get("seniority", "")}
+                                Department: {', '.join(lead.get("departments", []))}
+                                Skills: {skills}
+                                Tags: {tags}
+                                Bio: {bio}
+                                Location: {lead.get("city", "")}, {lead.get("state", "")}, {lead.get("country", "")}
+                                LinkedIn: {linkedin_url}
+
+                                --- Company Info ---
+                                Company: {company}
+                                Industry: {org.get("industry", "")}
+                                Company Size: {org.get("estimated_num_employees", "")} employees
+                                Company Keywords: {keywords}
+
+                                --- Writing Samples from LinkedIn Posts ---
+                                {post_snippets}
+
+                                --- Output Format ---
+                                {{
+                                "persona_type": "...",
+                                "communication_style": "...",
+                                "tone_profile": "...",
+                                "writing_style": "...",
+                                "key_interests": [...],
+                                "decision_drivers": [...],
+                                "objection_style": "...",
+                                "example_phrases": [...],
+                                "summary": "..."
+                                }}
+                            """
+
+                            try:
+                                response = client.chat.completions.create(
+                                    model="gpt-4",
+                                    messages=[{"role": "user", "content": prompt}],
+                                    temperature=0.7
+                                )
+
+                                content = response.choices[0].message.content
+                                persona = json.loads(content)
+
+                                # Save persona to Supabase
+                                supa_upload_json("leads", persona_path, persona)
+
+                                st.success("Persona generated and saved.")
                                 render_persona(persona)
-                            else:
-                                if st.button(f"Build Persona for {full_name}", key=f"btn_{lead_name}"):
-                                    from dotenv import load_dotenv
-                                    from openai import OpenAI
-                                    load_dotenv()
-                                    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-                                    linkedin_url = lead.get("linkedin_url", "")
-                                    posts = fetch_linkedin_posts(linkedin_url, lead_dir)
-                                    post_snippets = "\n".join(posts[:5]) if posts else "No public posts available."
-
-                                    org = lead.get("organization", {})
-                                    skills = ', '.join(lead.get("skills", [])[:10])
-                                    tags = ', '.join(lead.get("tags", [])[:10])
-                                    keywords = ', '.join(org.get("keywords", [])[:15])
-                                    bio = lead.get("summary", "") or lead.get("bio", "")
-
-                                    prompt = f"""
-                                        You are an advanced persona modeling system for B2B outreach.
-
-                                        Given the full professional and public-facing information of a lead, construct a complete **behavioral persona** that can be used to simulate realistic conversations and generate personalized communication.
-
-                                        --- Personal Info ---
-                                        Name: {full_name}
-                                        Title: {title}
-                                        Seniority: {lead.get("seniority", "")}
-                                        Department: {', '.join(lead.get("departments", []))}
-                                        Skills: {skills}
-                                        Tags: {tags}
-                                        Bio: {bio}
-                                        Location: {lead.get("city", "")}, {lead.get("state", "")}, {lead.get("country", "")}
-                                        LinkedIn: {linkedin_url}
-
-                                        --- Company Info ---
-                                        Company: {company}
-                                        Industry: {org.get("industry", "")}
-                                        Company Size: {org.get("estimated_num_employees", "")} employees
-                                        Company Keywords: {keywords}
-
-                                        --- Writing Samples from LinkedIn Posts ---
-                                        {post_snippets}
-
-                                        --- Output Format ---
-                                        {{
-                                        "persona_type": "...",
-                                        "communication_style": "...",
-                                        "tone_profile": "...",
-                                        "writing_style": "...",
-                                        "key_interests": [...],
-                                        "decision_drivers": [...],
-                                        "objection_style": "...",
-                                        "example_phrases": [...],
-                                        "summary": "..."
-                                        }}
-                                    """
-
-                                    try:
-                                        response = client.chat.completions.create(
-                                            model="gpt-4",
-                                            messages=[{"role": "user", "content": prompt}],
-                                            temperature=0.7
-                                        )
-
-                                        content = response.choices[0].message.content
-                                        persona = json.loads(content)
-
-                                        with open(persona_path, "w") as f:
-                                            json.dump(persona, f, indent=2)
-
-                                        st.success("Persona generated and saved.")
-                                        render_persona(persona)
-
-                                    except Exception as e:
-                                        st.error(f"Persona build failed: {e}")
+                            except Exception as e:
+                                st.error(f"Persona build failed: {e}")
 
             if matches == 0:
                 st.warning("No leads matched your search.")
@@ -280,7 +355,9 @@ with tab2:
             final_url = f"{base_url}?{'&'.join(query_parts)}"
             st.markdown(f"[Apollo Search URL]({final_url})")
 
-            apify_url = "https://api.apify.com/v2/acts/code_crafter~apollo-io-scraper/run-sync-get-dataset-items?token=YOUR_APIFY_TOKEN"
+            TOKEN_APIFY = os.getenv("APIFY_TOKEN")
+
+            apify_url = f"https://api.apify.com/v2/acts/code_crafter~apollo-io-scraper/run-sync-get-dataset-items?token={TOKEN_APIFY}"
 
             payload = {
                 "getPersonalEmails": True,
@@ -294,10 +371,10 @@ with tab2:
             if response.ok:
                 leads = response.json()
 
-                # Create folder for today
+                # Create path prefix for today
                 today = datetime.now().strftime("%Y-%m-%d")
-                scrape_dir = os.path.join("leads", today)
-                os.makedirs(scrape_dir, exist_ok=True)
+                bucket = "leads"
+                prefix = f"{today}"
 
                 df_rows = []
 
@@ -306,11 +383,10 @@ with tab2:
                     emp = next((e for e in lead.get("employment_history", []) if e.get("current")), {})
                     phone_list = [p.get("number", "") for p in lead.get("phone_numbers", [])]
 
-                    lead_dir = os.path.join(scrape_dir, full_name)
-                    os.makedirs(lead_dir, exist_ok=True)
+                    lead_subpath = f"{prefix}/{full_name}"
 
-                    with open(os.path.join(lead_dir, "lead.json"), "w") as f:
-                        json.dump(lead, f, indent=2)
+                    # Upload lead.json
+                    supa_upload_json(bucket, f"{lead_subpath}/lead.json", lead)
 
                     row = {
                         "Full Name": full_name,
@@ -331,12 +407,16 @@ with tab2:
 
                     df_rows.append(row)
 
-                    pd.DataFrame([row]).to_csv(os.path.join(lead_dir, "meta.csv"), index=False)
+                    # Upload meta.csv for each lead
+                    meta_df = pd.DataFrame([row])
+                    supa_upload_csv(bucket, f"{lead_subpath}/meta.csv", meta_df)
 
+                # Upload combined CSV
                 full_df = pd.DataFrame(df_rows)
-                full_df.to_csv(os.path.join(scrape_dir, "combined.csv"), index=False)
+                supa_upload_csv(bucket, f"{prefix}/combined.csv", full_df)
 
-                st.success(f"Scrape complete. {len(leads)} leads saved to leads/{today}/")
+                st.success(f"Scrape complete. {len(leads)} leads uploaded to Supabase under leads/{today}/")
+
             else:
                 st.error("Failed to fetch leads from Apify.")
                 st.text(response.text)
@@ -350,32 +430,23 @@ with tab3:
 
     st.subheader("All Leads with Personas")
 
-    base_path = "leads"
+    bucket = "leads"
     all_entries = []
 
-    for date_folder in sorted(os.listdir(base_path), reverse=True):
-        date_path = os.path.join(base_path, date_folder)
-        if not os.path.isdir(date_path):
-            continue
+    for date_folder in sorted(supa_list_folders(bucket), reverse=True):
+        for lead_folder in supa_list_folders(bucket, prefix=f"{date_folder}/"):
+            lead_path = f"{date_folder}/{lead_folder}/lead.json"
+            persona_path = f"{date_folder}/{lead_folder}/persona.json"
 
-        for lead_folder in os.listdir(date_path):
-            lead_dir = os.path.join(date_path, lead_folder)
-            persona_file = os.path.join(lead_dir, "persona.json")
-            lead_file = os.path.join(lead_dir, "lead.json")
+            lead = supa_load_json("leads", lead_path)
+            persona = supa_load_json("leads", persona_path)
 
-            if os.path.exists(persona_file) and os.path.exists(lead_file):
-                with open(lead_file) as lf:
-                    lead = json.load(lf)
-
-                with open(persona_file) as pf:
-                    persona = json.load(pf)
-
+            if lead and persona:
                 emp = next((e for e in lead.get("employment_history", []) if e.get("current")), {})
                 full_name = f"{lead.get('first_name', '')} {lead.get('last_name', '')}"
                 company = emp.get("organization_name", "")
                 title = emp.get("title", "")
                 email = lead.get("email", "")
-
                 photo_url = lead.get("photo_url") or ""
                 linkedin_url = lead.get("linkedin_url")
 
@@ -422,13 +493,9 @@ with tab3:
                 render_persona(entry['persona'])
 
                 # -- Email Generation Section --
-                email_status_path = os.path.join(base_path, entry['date'], entry['name'], "email_status.json")
-                email_status = {}
+                email_status_path = f"{entry['date']}/{entry['name']}/email_status.json"
+                email_status = supa_load_json(bucket, email_status_path) or {}
 
-                # Load existing email status if available
-                if os.path.exists(email_status_path):
-                    with open(email_status_path) as ef:
-                        email_status = json.load(ef)
 
                 current_status = email_status.get("status", "Not started")
                 st.markdown(f"**Current Email Status:** `{current_status.capitalize()}`")
@@ -552,13 +619,14 @@ with tab3:
                                     "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 }
 
-                                with open(email_status_path, "w", encoding="utf-8") as f:
-                                    json.dump(email_status, f, indent=2)
+                                # Save email_status.json to Supabase
+                                email_status_path = f"{entry['date']}/{entry['name']}/email_status.json"
+                                supa_upload_json(bucket, email_status_path, email_status)
 
-                                # Save as .txt for manual use
-                                txt_path = os.path.join(base_path, entry['date'], entry['name'], "cold_email.txt")
-                                with open(txt_path, "w", encoding="utf-8") as f:
-                                    f.write(full_reply)
+                                # Save cold_email.txt to Supabase
+                                cold_email_txt_path = f"{entry['date']}/{entry['name']}/cold_email.txt"
+                                supa_upload_file(bucket, cold_email_txt_path, full_reply.encode("utf-8"), file_options={"content-type": "text/plain"})
+
 
                                 # UI Feedback
                                 st.success("Cold email generated and saved.")
@@ -579,23 +647,18 @@ with tab3:
 with tab4:
     st.header("Talk To Leads")
 
-    base_path = "leads"
+    bucket = "leads"
     all_entries = []
 
-    for date_folder in sorted(os.listdir(base_path), reverse=True):
-        date_path = os.path.join(base_path, date_folder)
-        if not os.path.isdir(date_path): continue
+    for date_folder in sorted(supa_list_folders(bucket), reverse=True):
+        for lead_folder in supa_list_folders(bucket, prefix=f"{date_folder}/"):
+            lead_path = f"{date_folder}/{lead_folder}/lead.json"
+            persona_path = f"{date_folder}/{lead_folder}/persona.json"
 
-        for lead_folder in os.listdir(date_path):
-            lead_dir = os.path.join(date_path, lead_folder)
-            persona_path = os.path.join(lead_dir, "persona.json")
-            lead_path = os.path.join(lead_dir, "lead.json")
+            lead = supa_load_json(bucket, lead_path)
+            persona = supa_load_json(bucket, persona_path)
 
-            if os.path.exists(persona_path) and os.path.exists(lead_path):
-                with open(lead_path) as lf:
-                    lead = json.load(lf)
-                with open(persona_path) as pf:
-                    persona = json.load(pf)
+            if lead and persona:
                 full_name = f"{lead.get('first_name', '')} {lead.get('last_name', '')}"
                 all_entries.append({
                     "name": full_name,
@@ -612,31 +675,29 @@ with tab4:
     selected_label = st.selectbox("Choose a lead to talk to:", [f"{e['name']} ({e['date']})" for e in all_entries])
     selected_entry = next(e for e in all_entries if f"{e['name']} ({e['date']})" == selected_label)
 
-    # Chat path
-    chat_path = os.path.join(base_path, selected_entry["date"], selected_entry["folder"], "chat.json")
-    if os.path.exists(chat_path):
-        with open(chat_path) as f:
-            messages = json.load(f)
-    else:
+    # Supabase chat path
+    chat_path = f"{selected_entry['date']}/{selected_entry['folder']}/chat.json"
+    messages = supa_load_json(bucket, chat_path)
+
+    if not messages:
         messages = [{
             "role": "system",
             "content": f"""You are now simulating {selected_entry['name']}, a real-world professional based on detailed persona insights below.
 
-            Only respond in the tone, style, and mindset of this person. Use their vocabulary, preferred sentence structure, and emotional tone.
+Only respond in the tone, style, and mindset of this person. Use their vocabulary, preferred sentence structure, and emotional tone.
 
-            --- Persona Snapshot ---
-            {json.dumps(selected_entry['persona'], indent=2)}
+--- Persona Snapshot ---
+{json.dumps(selected_entry['persona'], indent=2)}
 
-            --- Behavior Guidelines ---
-            - Be authentic to this person’s communication style (e.g., concise, assertive, formal, friendly).
-            - Reflect their interests and priorities when responding (e.g., ROI, efficiency, market trends).
-            - If a question is irrelevant or off-topic, politely redirect or decline.
-            - Keep your responses natural, as if you're typing on LinkedIn or replying to a thoughtful DM — not like an AI bot.
+--- Behavior Guidelines ---
+- Be authentic to this person’s communication style (e.g., concise, assertive, formal, friendly).
+- Reflect their interests and priorities when responding (e.g., ROI, efficiency, market trends).
+- If a question is irrelevant or off-topic, politely redirect or decline.
+- Keep your responses natural, as if you're typing on LinkedIn or replying to a thoughtful DM — not like an AI bot.
 
-            Your job is to answer **as if you are this person**, staying completely in character.
-            """
-            }]
-
+Your job is to answer **as if you are this person**, staying completely in character.
+"""
+        }]
 
     st.markdown("### Conversation")
     for msg in messages[1:]:
@@ -662,8 +723,7 @@ with tab4:
                 reply = res.choices[0].message.content
                 messages.append({"role": "assistant", "content": reply})
 
-                with open(chat_path, "w", encoding="utf-8") as f:
-                    json.dump(messages, f, indent=2)
+                supa_upload_json(bucket, chat_path, messages)
 
                 st.experimental_rerun()
 
