@@ -50,41 +50,43 @@ def fetch_linkedin_posts(linkedin_url, lead_dir):
 
 
 def render_persona(persona):
-    st.markdown("### Persona Overview")
+    def orange_header(text):
+        return f"<h5 style='color:#f77e0b;margin-bottom:4px'>{text}</h5>"
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("**Persona Type**")
+        st.markdown(orange_header("Persona Type"), unsafe_allow_html=True)
         st.write(persona.get("persona_type", "-"))
 
-        st.markdown("**Communication Style**")
+        st.markdown(orange_header("Communication Style"), unsafe_allow_html=True)
         st.write(persona.get("communication_style", "-"))
 
-        st.markdown("**Tone Profile**")
+        st.markdown(orange_header("Tone Profile"), unsafe_allow_html=True)
         st.write(persona.get("tone_profile", "-"))
 
-        st.markdown("**Writing Style**")
+        st.markdown(orange_header("Writing Style"), unsafe_allow_html=True)
         st.write(persona.get("writing_style", "-"))
 
     with col2:
-        st.markdown("**Key Interests**")
+        st.markdown(orange_header("Key Interests"), unsafe_allow_html=True)
         st.write(", ".join(persona.get("key_interests", [])) or "-")
 
-        st.markdown("**Decision Drivers**")
+        st.markdown(orange_header("Decision Drivers"), unsafe_allow_html=True)
         st.write(", ".join(persona.get("decision_drivers", [])) or "-")
 
-        st.markdown("**Objection Style**")
+        st.markdown(orange_header("Objection Style"), unsafe_allow_html=True)
         st.write(persona.get("objection_style", "-"))
 
     if persona.get("example_phrases"):
-        st.markdown("**Example Phrases**")
+        st.markdown(orange_header("Example Phrases"), unsafe_allow_html=True)
         for phrase in persona["example_phrases"]:
             st.markdown(f"- _{phrase}_")
 
-    st.markdown("---")
-    st.markdown("**Summary**")
+    st.markdown("<hr style='margin-top:1rem; margin-bottom:1rem'>", unsafe_allow_html=True)
+    st.markdown(orange_header("Summary"), unsafe_allow_html=True)
     st.markdown(f"> {persona.get('summary', '-')}")
+
 
 
 
@@ -679,7 +681,7 @@ with col2:
             <a href="https://altara.in" target="_blank">
                 <img src="https://altara.in/assets/Favicon-CkpRsanc.png" width="80" style="box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 8px;">
             </a>
-            <p style="margin-top: 6px; font-size: 13px; color: #fff;">Built by ALTARA</p>
+            <p style="margin-top: 6px; font-size: 13px; color: black;">Built by ALTARA</p>
         </div>
         """,
         unsafe_allow_html=True

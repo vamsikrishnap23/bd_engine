@@ -38,8 +38,6 @@ ENV/
 
 leads/
 *.csv
-*.json
-*.txt
 *.pdf
 __output__/
 temp/
