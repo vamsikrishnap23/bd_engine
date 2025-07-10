@@ -6,7 +6,9 @@ import os
 from datetime import datetime
 from urllib.parse import quote
 import pandas as pd
-import difflib
+
+import os
+os.environ["STREAMLIT_WATCHDOG_USE_POLLING"] = "true"
 
 
 st.set_page_config(page_title="BD Engine", layout="wide")
